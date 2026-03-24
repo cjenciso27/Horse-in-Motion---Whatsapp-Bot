@@ -1,0 +1,15 @@
+Ignorar archivos de credenciales y seguridad de Google
+
+credenciales.json
+*.json
+
+Ignorar carpetas de entorno virtual de Python (por si usas uno)
+
+venv/
+env/
+__pycache__/
+*.pyc
+
+Ignorar variables de entorno
+
+.env
