@@ -1,3 +1,5 @@
+import os
+import sys
 from flask import Flask, request, jsonify
 import requests
 import gspread
@@ -5,28 +7,35 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
+# --- CONFIGURACIÓN DE RUTAS PARA LA NUBE ---
+# Esto asegura que PythonAnywhere encuentre tus llaves sin importar el directorio de trabajo
+base_path = os.path.dirname(os.path.abspath(__file__))
+ruta_json = os.path.join(base_path, 'credenciales.json')
+
 # --- TUS LLAVES DE META ---
-TOKEN_META = "Pega_Aqui_Tu_Token"
-PHONE_NUMBER_ID = "Pega_Aqui_Tu_Token"
+TOKEN_META = "EAAWu7PFUUc0BRJZBkT7LEGkZChgaWZA3ZBiaoVOvOelZBepMPfhE4q2XZAMAZAMVwEY294wt8jjaEZA0MHl9arWnYoGLz9QuaRHZAAuL3b5MZBI7I2oZBkMm4CvDDjixyf2ZBruphNBbHrbQKdPKEckZCJWIvx2dKbT8zEyNH5B6sx7P1vrFXM07pZA7yBeMUq5RSH2c5lIxtYgun7YTxeUazZAfvYWrdXMYJJet6ZBW3jIPn9w8LgSQZC44m1nG3BtBbLRiU4F5YUb9LjZBZB7QVQGC02ZCVgZDZD"
+PHONE_NUMBER_ID = "986362287897636"
 VERIFY_TOKEN = "horse_in_motion_2026"
 
 # --- CONFIGURACIÓN GOOGLE SHEETS ---
-try:
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
-    cliente_sheets = gspread.authorize(creds)
-    # IMPORTANTE: Este nombre debe ser exactamente igual al de tu archivo en Google Drive
-    hoja_leads = cliente_sheets.open("Leads_HorseInMotion").sheet1
-    print("✅ Conexión a Google Sheets exitosa.")
-except Exception as e:
-    print("⚠️ Error conectando a Sheets. Revisá el credenciales.json o el nombre del archivo:", e)
+def conectar_sheets():
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(ruta_json, scope)
+        cliente_sheets = gspread.authorize(creds)
+        # El nombre debe coincidir con tu archivo en Drive
+        return cliente_sheets.open("Leads_HorseInMotion").sheet1
+    except Exception as e:
+        print(f"⚠️ Error conectando a Sheets: {e}")
+        return None
+
+hoja_leads = conectar_sheets()
 
 # --- MEMORIA DEL BOT ---
 mensajes_procesados = set()
 estado_usuarios = {}
 datos_clientes = {}
 
-# Función maestra para enviar mensajes de WhatsApp
 def enviar_mensaje(numero_destino, texto):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
@@ -42,9 +51,8 @@ def enviar_mensaje(numero_destino, texto):
     try:
         requests.post(url, headers=headers, json=data)
     except Exception as e:
-        print("Error al enviar:", e)
+        print(f"Error al enviar mensaje: {e}")
 
-# 1. Función para verificar la conexión con Meta (GET)
 @app.route('/webhook', methods=['GET'])
 def verificar_webhook():
     hub_mode = request.args.get('hub.mode')
@@ -53,11 +61,11 @@ def verificar_webhook():
     
     if hub_mode == 'subscribe' and hub_verify_token == VERIFY_TOKEN:
         return hub_challenge, 200
-    return "Error", 403
+    return "Error de verificación", 403
 
-# 2. Función para recibir mensajes y manejar el flujo (POST)
 @app.route('/webhook', methods=['POST'])
 def recibir_mensajes():
+    global hoja_leads
     try:
         data = request.get_json()
         if 'entry' in data and 'changes' in data['entry'][0]:
@@ -68,15 +76,12 @@ def recibir_mensajes():
                 texto_recibido = mensaje_info['text']['body']
                 mensaje_id = mensaje_info['id']
                 
-                # Filtro anti-spam (Caché en memoria)
+                # Filtro anti-spam
                 if mensaje_id in mensajes_procesados:
                     return jsonify({"status": "success"}), 200
                 mensajes_procesados.add(mensaje_id)
                 
-                print(f"📩 [{numero_cliente}] dice: {texto_recibido}")
-                
-                # --- LA MÁQUINA DE ESTADOS (LEAD SCORING) ---
-                
+                # --- MÁQUINA DE ESTADOS ---
                 if numero_cliente not in estado_usuarios:
                     enviar_mensaje(numero_cliente, "¡Hola! Soy el asistente virtual de Horse in Motion 🎬. Antes de agendar, queremos asegurar que estamos en la misma sintonía. Para empezar, ¿con quién tengo el gusto de hablar?")
                     estado_usuarios[numero_cliente] = "PASO_1"
@@ -127,13 +132,14 @@ def recibir_mensajes():
                     enviar_mensaje(numero_cliente, "Última pregunta: Para asegurar la calidad estratégica que ofrecemos, ¿el presupuesto estimado para este proyecto supera los $3000? (Respondé Sí o No)")
                     estado_usuarios[numero_cliente] = "PASO_10"
 
-                # NODO DE DECISIÓN FINAL Y GUARDADO EN SHEETS
                 elif estado_usuarios[numero_cliente] == "PASO_10":
                     respuesta_presupuesto = texto_recibido.strip().lower()
                     datos_clientes[numero_cliente]["presupuesto"] = respuesta_presupuesto
                     nombre_cliente = datos_clientes[numero_cliente].get("nombre", "Cliente")
 
-                    # 1. Guardar en Google Sheets
+                    # Intentar reconectar si la sesión de Sheets expiró
+                    if hoja_leads is None: hoja_leads = conectar_sheets()
+
                     fila = [
                         nombre_cliente,
                         datos_clientes[numero_cliente].get("identidad", ""),
@@ -149,26 +155,25 @@ def recibir_mensajes():
                     
                     try:
                         hoja_leads.append_row(fila)
-                        print("✅ Nuevo Lead guardado en Google Sheets.")
                     except Exception as e:
-                        print("❌ Error guardando fila en Sheets:", e)
+                        print(f"❌ Error guardando en Sheets: {e}")
 
-                    # 2. Bifurcación Lógica (Sí o No)
+                    # Bifurcación Lógica
                     if respuesta_presupuesto in ["si", "sí", "yes"]:
                         link_gcal = "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1IouPLHXfmYTq0ioduLAkFT8T49Da_aCeGhbE7SIYHEM2xlvHalQqFLUgxAkge15UACjCNYBCx"
-                        enviar_mensaje(numero_cliente, f"¡Parece que hablamos el mismo idioma, {nombre_cliente}! 🚀 Aquí tenés el acceso al calendario de Luis Diego para agendar nuestra sesión de diagnóstico: {link_gcal} \n\n¡Hablamos pronto!")
+                        enviar_mensaje(numero_cliente, f"¡Parece que hablamos el mismo idioma, {nombre_cliente}! 🚀 Aquí tenés el acceso al calendario de Luis Diego para agendar nuestra sesión de diagnóstico: {link_gcal}")
                     else:
-                        enviar_mensaje(numero_cliente, f"¡Gracias por la info, {nombre_cliente}! Por tus respuestas, veo que tu marca está en una etapa diferente a la que atendemos en Horse in Motion.\n\nPara no quitarte tiempo con una reunión, te invito a conocer más sobre nuestros servicios en nuestra web: https://horse-inmotion.com \n\n¡Mucho éxito con tu proyecto!")
+                        enviar_mensaje(numero_cliente, f"¡Gracias, {nombre_cliente}! Por tus respuestas, vemos que tu marca está en una etapa diferente. Te invitamos a conocer más en nuestra web: https://horse-inmotion.com")
 
-                    # Limpiamos memoria
                     del estado_usuarios[numero_cliente]
                     del datos_clientes[numero_cliente]
 
         return jsonify({"status": "success"}), 200
         
     except Exception as e:
-        print(f"Error interno: {e}")
+        print(f"Error interno del servidor: {e}")
         return jsonify({"status": "error"}), 500
 
 if __name__ == '__main__':
+    # Esto solo corre si lo ejecutas localmente. PythonAnywhere usa el archivo WSGI.
     app.run(port=5000)
