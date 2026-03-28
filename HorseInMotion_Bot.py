@@ -21,7 +21,7 @@ else:
     print("🏠 Entorno: Local / Desarrollo")
 
 # --- TUS LLAVES DE META ---
-TOKEN_META = "EAAWu7PFUUc0BRJZBkT7LEGkZChgaWZA3ZBiaoVOvOelZBepMPfhE4q2XZAMAZAMVwEY294wt8jjaEZA0MHl9arWnYoGLz9QuaRHZAAuL3b5MZBI7I2oZBkMm4CvDDjixyf2ZBruphNBbHrbQKdPKEckZCJWIvx2dKbT8zEyNH5B6sx7P1vrFXM07pZA7yBeMUq5RSH2c5lIxtYgun7YTxeUazZAfvYWrdXMYJJet6ZBW3jIPn9w8LgSQZC44m1nG3BtBbLRiU4F5YUb9LjZBZB7QVQGC02ZCVgZDZD"
+TOKEN_META = "EAAWu7PFUUc0BRPvxFFxFQR5DGZBFtzY2dT4DwmVEptiDXnN6zDz0fi0hVv0ZAtSagfzu8cj0PUGW0nGz31hf8AQSihtTEm75uZBIElZB4A9HQZBvrwxeZAnJxPZBXmF3mMWZAtnFzrtlJDb2wu2j52KRAcVqgC50ZBS7CoZAFvISwoWLW76rBiv6IQLr1xZBuZBCaqNOrowjQpszsU7l4Lov7SGf1EuLbqQKhK93MswF7q68RoAa66kg51jN9Uwg0wBKTFdanbaXJx5IJXGyfyz2MgZDZD"
 PHONE_NUMBER_ID = "986362287897636"
 VERIFY_TOKEN = "horse_in_motion_2026"
 
@@ -57,7 +57,9 @@ def enviar_mensaje(numero_destino, texto):
         "text": {"body": texto}
     }
     try:
-        requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data)
+        # ESTO ES CLAVE: Ver qué responde Meta
+        print(f"DEBUG META: Status {response.status_code} - Resposta: {response.text}")
     except Exception as e:
         print(f"Error al enviar mensaje: {e}")
 
