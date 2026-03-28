@@ -7,10 +7,18 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN DE RUTAS PARA LA NUBE ---
-# Esto asegura que PythonAnywhere encuentre tus llaves sin importar el directorio de trabajo
-base_path = os.path.dirname(os.path.abspath(__file__))
-ruta_json = os.path.join(base_path, 'credenciales.json')
+# --- CONFIGURACIÓN DE RUTAS (PARA RENDER Y LOCAL) ---
+# Render guarda los Secret Files en /etc/secrets/
+ruta_render = '/etc/secrets/credenciales.json'
+ruta_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'credenciales.json')
+
+# Si existe la ruta de Render, la usamos; si no, buscamos el archivo local
+if os.path.exists(ruta_render):
+    ruta_json = ruta_render
+    print("🚀 Entorno: Render (Secret Files)")
+else:
+    ruta_json = ruta_local
+    print("🏠 Entorno: Local / Desarrollo")
 
 # --- TUS LLAVES DE META ---
 TOKEN_META = "EAAWu7PFUUc0BRJZBkT7LEGkZChgaWZA3ZBiaoVOvOelZBepMPfhE4q2XZAMAZAMVwEY294wt8jjaEZA0MHl9arWnYoGLz9QuaRHZAAuL3b5MZBI7I2oZBkMm4CvDDjixyf2ZBruphNBbHrbQKdPKEckZCJWIvx2dKbT8zEyNH5B6sx7P1vrFXM07pZA7yBeMUq5RSH2c5lIxtYgun7YTxeUazZAfvYWrdXMYJJet6ZBW3jIPn9w8LgSQZC44m1nG3BtBbLRiU4F5YUb9LjZBZB7QVQGC02ZCVgZDZD"
@@ -23,7 +31,7 @@ def conectar_sheets():
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name(ruta_json, scope)
         cliente_sheets = gspread.authorize(creds)
-        # El nombre debe coincidir con tu archivo en Drive
+        # Asegurate de que el nombre de la hoja sea exacto
         return cliente_sheets.open("Leads_HorseInMotion").sheet1
     except Exception as e:
         print(f"⚠️ Error conectando a Sheets: {e}")
@@ -61,7 +69,7 @@ def verificar_webhook():
     
     if hub_mode == 'subscribe' and hub_verify_token == VERIFY_TOKEN:
         return hub_challenge, 200
-    return "Error de verificación", 403
+    return "Error de Verificación", 403
 
 @app.route('/webhook', methods=['POST'])
 def recibir_mensajes():
@@ -81,7 +89,7 @@ def recibir_mensajes():
                     return jsonify({"status": "success"}), 200
                 mensajes_procesados.add(mensaje_id)
                 
-                # --- MÁQUINA DE ESTADOS ---
+                # --- MÁQUINA DE ESTADOS (Lead Scoring) ---
                 if numero_cliente not in estado_usuarios:
                     enviar_mensaje(numero_cliente, "¡Hola! Soy el asistente virtual de Horse in Motion 🎬. Antes de agendar, queremos asegurar que estamos en la misma sintonía. Para empezar, ¿con quién tengo el gusto de hablar?")
                     estado_usuarios[numero_cliente] = "PASO_1"
@@ -99,7 +107,7 @@ def recibir_mensajes():
 
                 elif estado_usuarios[numero_cliente] == "PASO_3":
                     datos_clientes[numero_cliente]["norte"] = texto_recibido
-                    enviar_mensaje(numero_cliente, "¿Cuál es el objetivo principal de este proyecto?\n1. Diferenciarnos en la góndola / Punto de venta.\n2. Posicionamiento corporativo / Institucional.\n3. Contenido 'lifestyle' para redes sociales.")
+                    enviar_mensaje(numero_cliente, "¿Cuál es el objetivo principal de este proyecto?\n1. Diferenciarnos en la góndola.\n2. Posicionamiento corporativo.\n3. Contenido 'lifestyle' para redes sociales.")
                     estado_usuarios[numero_cliente] = "PASO_4"
 
                 elif estado_usuarios[numero_cliente] == "PASO_4":
@@ -119,25 +127,25 @@ def recibir_mensajes():
 
                 elif estado_usuarios[numero_cliente] == "PASO_7":
                     datos_clientes[numero_cliente]["relevancia"] = texto_recibido
-                    enviar_mensaje(numero_cliente, "¿Están buscando una productora para un video único (one-off) o un aliado estratégico para unificar el discurso a largo plazo?")
+                    enviar_mensaje(numero_cliente, "¿Están buscando una productora para un video único o un aliado estratégico?")
                     estado_usuarios[numero_cliente] = "PASO_8"
 
                 elif estado_usuarios[numero_cliente] == "PASO_8":
                     datos_clientes[numero_cliente]["calidad"] = texto_recibido
-                    enviar_mensaje(numero_cliente, "¿Para cuándo necesitan tener este material 'al aire' o listo para distribución?")
+                    enviar_mensaje(numero_cliente, "¿Para cuándo necesitan tener este material listo?")
                     estado_usuarios[numero_cliente] = "PASO_9"
 
                 elif estado_usuarios[numero_cliente] == "PASO_9":
                     datos_clientes[numero_cliente]["tiempo"] = texto_recibido
-                    enviar_mensaje(numero_cliente, "Última pregunta: Para asegurar la calidad estratégica que ofrecemos, ¿el presupuesto estimado para este proyecto supera los $3000? (Respondé Sí o No)")
+                    enviar_mensaje(numero_cliente, "Última pregunta: ¿el presupuesto estimado para este proyecto supera los $3000? (Respondé Sí o No)")
                     estado_usuarios[numero_cliente] = "PASO_10"
 
                 elif estado_usuarios[numero_cliente] == "PASO_10":
-                    respuesta_presupuesto = texto_recibido.strip().lower()
-                    datos_clientes[numero_cliente]["presupuesto"] = respuesta_presupuesto
+                    resp_p = texto_recibido.strip().lower()
+                    datos_clientes[numero_cliente]["presupuesto"] = resp_p
                     nombre_cliente = datos_clientes[numero_cliente].get("nombre", "Cliente")
 
-                    # Intentar reconectar si la sesión de Sheets expiró
+                    # Reconexión automática si falla
                     if hoja_leads is None: hoja_leads = conectar_sheets()
 
                     fila = [
@@ -150,30 +158,30 @@ def recibir_mensajes():
                         datos_clientes[numero_cliente].get("relevancia", ""),
                         datos_clientes[numero_cliente].get("calidad", ""),
                         datos_clientes[numero_cliente].get("tiempo", ""),
-                        respuesta_presupuesto
+                        resp_p
                     ]
                     
                     try:
                         hoja_leads.append_row(fila)
+                        print("✅ Lead guardado exitosamente.")
                     except Exception as e:
-                        print(f"❌ Error guardando en Sheets: {e}")
+                        print(f"❌ Error en Sheets: {e}")
 
-                    # Bifurcación Lógica
-                    if respuesta_presupuesto in ["si", "sí", "yes"]:
+                    if resp_p in ["si", "sí", "yes"]:
                         link_gcal = "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1IouPLHXfmYTq0ioduLAkFT8T49Da_aCeGhbE7SIYHEM2xlvHalQqFLUgxAkge15UACjCNYBCx"
-                        enviar_mensaje(numero_cliente, f"¡Parece que hablamos el mismo idioma, {nombre_cliente}! 🚀 Aquí tenés el acceso al calendario de Luis Diego para agendar nuestra sesión de diagnóstico: {link_gcal}")
+                        enviar_mensaje(numero_cliente, f"¡Hablamos el mismo idioma, {nombre_cliente}! 🚀 Agendá tu sesión aquí: {link_gcal}")
                     else:
-                        enviar_mensaje(numero_cliente, f"¡Gracias, {nombre_cliente}! Por tus respuestas, vemos que tu marca está en una etapa diferente. Te invitamos a conocer más en nuestra web: https://horse-inmotion.com")
+                        enviar_mensaje(numero_cliente, f"¡Gracias, {nombre_cliente}! Te invitamos a conocer más en nuestra web: https://horse-inmotion.com")
 
                     del estado_usuarios[numero_cliente]
                     del datos_clientes[numero_cliente]
 
         return jsonify({"status": "success"}), 200
-        
     except Exception as e:
-        print(f"Error interno del servidor: {e}")
+        print(f"Error interno: {e}")
         return jsonify({"status": "error"}), 500
 
 if __name__ == '__main__':
-    # Esto solo corre si lo ejecutas localmente. PythonAnywhere usa el archivo WSGI.
-    app.run(port=5000)
+    # Puerto dinámico para Render
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
